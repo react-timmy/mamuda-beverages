@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pop Cola — Hero</title>
+  <style>
+    :root{--hero-height:100vh;}
+    html,body{height:100%;margin:0}
+    .hero{
+      position:relative;
+      width:100%;
+      height:var(--hero-height);
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+      background:#000;
+    }
+
+    /* video background */
+    .hero__video{
+      position:absolute;
+      top:50%;
+      left:50%;
+      width:auto;
+      height:100%;
+      min-width:100%;
+      transform:translate(-50%,-50%);
+      object-fit:cover;
+      z-index:0;
+    }
+
+    /* overlay for content */
+    .hero__overlay{
+      position:relative;
+      z-index:2;
+      text-align:center;
+      padding:24px;
+      max-width:1100px;
+      width:100%;
+    }
+
+    .hero__title{
+      font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+      font-size:clamp(28px,6vw,64px);
+      line-height:1.02;
+      margin:0 0 12px 0;
+      text-shadow:0 6px 18px rgba(0,0,0,0.6);
+    }
+
+    .hero__cta{
+      display:inline-block;
+      background:rgba(255,255,255,0.12);
+      color:#fff;
+      padding:12px 20px;
+      border-radius:8px;
+      text-decoration:none;
+      font-weight:600;
+      backdrop-filter: blur(6px);
+    }
+
+    /* dark gradient to improve contrast */
+    .hero__gradient{
+      position:absolute;
+      inset:0;
+      z-index:1;
+      background:linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.45) 60%, rgba(0,0,0,0.65) 100%);
+      pointer-events:none;
+    }
+
+    /* Respect prefers-reduced-motion: hide video and show poster image instead */
+    @media (prefers-reduced-motion: reduce) {
+      .hero__video{ display:none; }
+      .hero{ background-size:cover; background-position:center; }
+    }
+  </style>
+</head>
+<body>
+
+  <section class="hero" aria-labelledby="hero-title" role="region">
+    <video id="heroVideo"
+           class="hero__video"
+           autoplay muted loop playsinline
+           preload="auto"
+           poster="assets/pop-cola-3d-ref.png">
+      <source src="assets/pop-cola-hero-bg.mp4" type="video/mp4">
+      <!-- Fallback image for very old browsers -->
+      <img src="assets/pop-cola-3d-ref.png" alt="Pop Cola bottle on a studio background">
+    </video>
+
+    <div class="hero__gradient" aria-hidden="true"></div>
+
+    <div class="hero__overlay">
+      <h1 id="hero-title" class="hero__title">Pop Cola — Taste the Spark</h1>
+      <p style="max-width:60ch;margin:12px auto 22px auto;opacity:0.95">Discover the new Pop Cola with bold caramel notes and effervescent fizz. Scroll to rotate the bottle.</p>
+      <a class="hero__cta" href="#product">Explore the product</a>
+    </div>
+  </section>
+
+  <script>
+    // Ensure autoplay works: video must be muted (already set). When the page is hidden, pause to save resources.
+    (function(){
+      var v = document.getElementById('heroVideo');
+      if(!v) return;
+
+      // Try to play (some browsers block autoplay until play() is called programmatically)
+      var tryPlay = function(){
+        var p = v.play();
+        if(p !== undefined){
+          p.catch(function(e){
+            // Autoplay failed; keep muted and rely on poster image
+            console.warn('hero video autoplay failed:', e);
+          });
+        }
+      };
+
+      document.addEventListener('visibilitychange', function(){
+        if(document.hidden){ v.pause(); }
+        else { tryPlay(); }
+      });
+
+      // If user prefers reduced motion, don't auto-play the video
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      if(mq && mq.matches){
+        v.style.display = 'none';
+      } else {
+        tryPlay();
+      }
+
+      // Optional: reduce video playback on mobile to save bandwidth
+      if(/Mobi|Android/i.test(navigator.userAgent)){
+        v.playbackRate = 1.0; // keep normal, but could lower (e.g., 0.9) if desired
+      }
+    })();
+  </script>
+</body>
+</html>
