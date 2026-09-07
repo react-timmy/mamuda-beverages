@@ -1,143 +1,299 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { SplitText } from 'gsap/SplitText';
 
-gsap.registerPlugin(ScrollTrigger, SplitText);
+gsap.registerPlugin(SplitText);
 
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// How many viewport-heights the spacer occupies (controls scroll speed through animation)
+const SCROLL_SCREENS = 5;
+
+const BEATS = [
+  { start: 0.15, end: 0.32 },
+  { start: 0.40, end: 0.57 },
+  { start: 0.68, end: 1.00 },
+];
+
+function getBeatIndex(p) {
+  if (p < BEATS[0].start) return -1;
+  for (let i = 0; i < BEATS.length; i++) {
+    if (p >= BEATS[i].start && p <= BEATS[i].end) return i;
+    const nextStart = BEATS[i + 1]?.start ?? Infinity;
+    if (p > BEATS[i].end && p < nextStart) return i;
+  }
+  return BEATS.length - 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 const ScrollytellingHero = () => {
-  const containerRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [imagesLoaded, setImagesLoaded] = useState(false);
-  const [loadProgress, setLoadProgress] = useState(0);
-  const imagesRef = useRef([]);
-  const currentFrameRef = useRef(0);
+  const heroRef         = useRef(null);
+  const canvasRef       = useRef(null);
+  const spacerRef       = useRef(null);
+  const rafRef          = useRef(null);          // animation frame id
+  const displayFrameRef = useRef(0);             // current lerped frame (float)
+  const renderedFrameRef = useRef(-1);           // last frame drawn to canvas
+  const releasedRef     = useRef(false);         // true once hero has been released
+  const reentryWatchRef = useRef(null);
 
+  const [imagesLoaded, setImagesLoaded]  = useState(false);
+  const [loadProgress, setLoadProgress]  = useState(0);
+  const [beatIndex,    setBeatIndex]     = useState(-1);
+  const [animDone,     setAnimDone]      = useState(false);
+
+  const imagesRef  = useRef([]);
   const frameCount = 196;
-  const imagePath = '/ExplodedView/ezgif-frame-';
+  const imagePath  = '/ExplodedView/ezgif-frame-';
 
+  // ── canvas render ─────────────────────────────────────────────────────────
+  const renderFrame = useCallback((fi) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const img = imagesRef.current[fi];
+    if (!img?.complete || !img.naturalWidth) return;
+
+    const iA = img.naturalWidth / img.naturalHeight;
+    const cA = canvas.width / canvas.height;
+    let dW, dH, oX, oY;
+    if (iA > cA) {
+      dH = canvas.height; dW = dH * iA;
+      oX = (canvas.width - dW) / 2; oY = 0;
+    } else {
+      dW = canvas.width; dH = dW / iA;
+      oX = 0; oY = (canvas.height - dH) / 2;
+    }
+    ctx.drawImage(img, oX, oY, dW, dH);
+    renderedFrameRef.current = fi;
+  }, []);
+
+  // ── RAF scrub loop ────────────────────────────────────────────────────────
+  // Reads native scroll, lerps display frame toward target, draws only on change
+  const startRaf = useCallback(() => {
+    if (rafRef.current) return;
+
+    const LERP = 0.12; // smoothing — lower = more lag/cinema feel, higher = snappier
+
+    const tick = () => {
+      rafRef.current = requestAnimationFrame(tick);
+
+      const spacer = spacerRef.current;
+      if (!spacer || releasedRef.current) return;
+
+      const spacerTop    = spacer.getBoundingClientRect().top + window.scrollY;
+      const scrollHeight = spacer.offsetHeight - window.innerHeight;
+      if (scrollHeight <= 0) return;
+
+      const rawProgress = clamp((window.scrollY - spacerTop) / scrollHeight, 0, 1);
+      const targetFrame = rawProgress * (frameCount - 1);
+
+      // Lerp display frame toward target
+      const prev = displayFrameRef.current;
+      const next = prev + (targetFrame - prev) * LERP;
+      displayFrameRef.current = next;
+
+      const fi = Math.round(next);
+      if (fi !== renderedFrameRef.current) {
+        renderFrame(fi);
+        setBeatIndex(getBeatIndex(rawProgress));
+      }
+
+      // Release when scroll has reached the end of the spacer
+      if (rawProgress >= 0.999 && !releasedRef.current) {
+        releasedRef.current = true;
+        releaseHeroFn.current?.();
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+  }, [renderFrame]);
+
+  const stopRaf = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  // ── release hero ──────────────────────────────────────────────────────────
+  // Stored in a ref so the RAF closure always calls the latest version
+  const releaseHeroFn = useRef(null);
+
+  const releaseHero = useCallback(() => {
+    stopRaf();
+    setAnimDone(true);
+
+    // Restore normal body scroll
+    document.body.style.overflow  = '';
+    document.body.style.overflowX = 'hidden';
+
+    const hero = heroRef.current;
+    if (!hero) return;
+
+    gsap.to(hero, {
+      y: '-100%',
+      duration: 0.75,
+      ease: 'power3.inOut',
+      onComplete: () => {
+        hero.style.display = 'none';
+
+        // Collapse the spacer so the 500vh gap doesn't remain in the DOM
+        const spacer = spacerRef.current;
+        if (spacer) {
+          spacer.style.height  = '0';
+          spacer.style.display = 'none';
+        }
+
+        // Snap scroll to top so page content starts at position 0
+        window.scrollTo({ top: 0, behavior: 'instant' });
+
+        watchForReentry();
+      },
+    });
+  }, [stopRaf]);
+
+  // Keep ref current
+  useEffect(() => { releaseHeroFn.current = releaseHero; }, [releaseHero]);
+
+  // ── watch for scroll-back-to-top ──────────────────────────────────────────
+  const watchForReentry = useCallback(() => {
+    if (reentryWatchRef.current) return;
+
+    // Wait until the user has scrolled away from the top before we listen
+    // for a return-to-top. This prevents the programmatic scrollTo(0) that
+    // fires during release from immediately re-triggering the hero.
+    let hasScrolledAway = false;
+
+    const onScroll = () => {
+      if (!hasScrolledAway) {
+        // Mark once the user is clearly away from the top
+        if (window.scrollY > 50) hasScrolledAway = true;
+        return;
+      }
+
+      if (window.scrollY > 10) return;
+
+      window.removeEventListener('scroll', onScroll);
+      reentryWatchRef.current = null;
+
+      window.scrollTo({ top: 0, behavior: 'instant' });
+
+      const spacer = spacerRef.current;
+      if (spacer) {
+        spacer.style.display = 'block';
+        spacer.style.height  = `${SCROLL_SCREENS * 100}vh`;
+      }
+
+      const hero = heroRef.current;
+      if (!hero) return;
+      hero.style.display = 'block';
+
+      releasedRef.current    = false;
+      displayFrameRef.current = frameCount - 1;
+      renderedFrameRef.current = -1;
+      setAnimDone(false);
+
+      // Show last frame immediately
+      renderFrame(frameCount - 1);
+
+      gsap.fromTo(
+        hero,
+        { y: '-100%' },
+        {
+          y: 0,
+          duration: 0.65,
+          ease: 'power3.out',
+          onComplete: () => {
+            // Scroll back to spacer top so progress resets
+            window.scrollTo({ top: 0, behavior: 'instant' });
+            startRaf();
+          },
+        }
+      );
+    };
+
+    // Delay attaching the listener by one frame so the programmatic
+    // scrollTo(0) from releaseHero has fully settled and won't trigger onScroll.
+    const tid = setTimeout(() => {
+      window.addEventListener('scroll', onScroll, { passive: true });
+    }, 200);
+    reentryWatchRef.current = () => {
+      clearTimeout(tid);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, [renderFrame, startRaf]);
+
+  // ── canvas sizing ─────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-
-    const setCanvasSize = () => {
-      canvas.width = window.innerWidth;
+    const setSize = () => {
+      canvas.width  = window.innerWidth;
       canvas.height = window.innerHeight;
+      // Re-draw current frame at new size
+      const fi = Math.round(displayFrameRef.current);
+      renderedFrameRef.current = -1;
+      renderFrame(fi);
     };
-    setCanvasSize();
-    window.addEventListener('resize', setCanvasSize);
+    setSize();
+    window.addEventListener('resize', setSize);
+    return () => window.removeEventListener('resize', setSize);
+  }, [renderFrame]);
 
-    const loadImages = async () => {
-      const imagePromises = [];
-      const priorityFrames = [1, frameCount];
-      const regularFrames = [];
+  // ── preload images ────────────────────────────────────────────────────────
+  useEffect(() => {
+    let loaded = 0;
+    const indices = Array.from({ length: frameCount }, (_, k) => k + 1);
 
-      for (let i = 2; i < frameCount; i++) {
-        regularFrames.push(i);
-      }
+    // Load first frame immediately so there's something on screen fast
+    const firstImg = new Image();
+    firstImg.src = `${imagePath}001.jpg`;
+    imagesRef.current[0] = firstImg;
+    firstImg.onload = () => renderFrame(0);
 
-      for (const i of priorityFrames) {
-        const img = new Image();
-        const paddedIndex = i.toString().padStart(3, '0');
-        img.src = `${imagePath}${paddedIndex}.jpg`;
-        const promise = new Promise((resolve, reject) => {
-          img.onload = () => {
-            setLoadProgress(Math.round((priorityFrames.indexOf(i) + 1) / frameCount * 100));
-            resolve();
-          };
-          img.onerror = reject;
-        });
-        imagesRef.current[i - 1] = img;
-        imagePromises.push(promise);
-      }
-
-      for (const i of regularFrames) {
-        const img = new Image();
-        const paddedIndex = i.toString().padStart(3, '0');
-        img.src = `${imagePath}${paddedIndex}.jpg`;
-        const promise = new Promise((resolve, reject) => {
-          img.onload = () => {
-            const totalLoaded = priorityFrames.length + regularFrames.indexOf(i) + 1;
-            setLoadProgress(Math.round((totalLoaded / frameCount) * 100));
-            resolve();
-          };
-          img.onerror = reject;
-        });
-        imagesRef.current[i - 1] = img;
-        imagePromises.push(promise);
-      }
-
-      await Promise.all(imagePromises);
+    Promise.all(
+      indices.map((i) =>
+        new Promise((res) => {
+          if (i === 1) { res(); return; } // already loading above
+          const img = new Image();
+          img.src = `${imagePath}${i.toString().padStart(3, '0')}.jpg`;
+          img.onload  = () => { loaded++; setLoadProgress(Math.round((loaded + 1) / frameCount * 100)); res(); };
+          img.onerror = () => res();
+          imagesRef.current[i - 1] = img;
+        })
+      )
+    ).then(() => {
+      setLoadProgress(100);
       setImagesLoaded(true);
       renderFrame(0);
-    };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    loadImages();
-
-    const renderFrame = (frameIndex) => {
-      const img = imagesRef.current[frameIndex];
-      if (!img || !img.complete) return;
-
-      context.fillStyle = '#000000';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-
-      const imgAspect = img.width / img.height;
-      const canvasAspect = canvas.width / canvas.height;
-      let drawWidth, drawHeight, offsetX, offsetY;
-
-      if (imgAspect > canvasAspect) {
-        drawHeight = canvas.height;
-        drawWidth = drawHeight * imgAspect;
-        offsetX = (canvas.width - drawWidth) / 2;
-        offsetY = 0;
-      } else {
-        drawWidth = canvas.width;
-        drawHeight = drawWidth / imgAspect;
-        offsetX = 0;
-        offsetY = (canvas.height - drawHeight) / 2;
-      }
-
-      context.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
-      currentFrameRef.current = frameIndex;
-    };
-
-    let heroTrigger;
-
-    const setupScrollAnimation = () => {
-      heroTrigger = ScrollTrigger.create({
-        trigger: containerRef.current,
-        start: 'top top',
-        end: 'bottom bottom',
-        scrub: 0.5,
-        onUpdate: (self) => {
-          const frameIndex = Math.min(
-            Math.floor(self.progress * (frameCount - 1)),
-            frameCount - 1
-          );
-          if (frameIndex !== currentFrameRef.current) {
-            renderFrame(frameIndex);
-          }
-        }
-      });
-    };
-
-    if (imagesLoaded) {
-      setupScrollAnimation();
-    }
-
+  // ── start RAF once images ready ───────────────────────────────────────────
+  useEffect(() => {
+    if (!imagesLoaded) return;
+    // Lock horizontal overflow only — vertical scroll drives the animation
+    document.body.style.overflowX = 'hidden';
+    startRaf();
     return () => {
-      window.removeEventListener('resize', setCanvasSize);
-      if (heroTrigger) heroTrigger.kill();
+      stopRaf();
+      reentryWatchRef.current?.();
     };
-  }, [imagesLoaded]);
+  }, [imagesLoaded, startRaf, stopRaf]);
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <section ref={containerRef} className="relative w-full" style={{ height: '500vh' }}>
-      <div className="sticky top-0 left-0 w-full h-screen overflow-hidden">
+    <>
+      {/* Fixed hero panel — stays in the viewport while user scrolls the spacer */}
+      <div
+        ref={heroRef}
+        className="fixed inset-0 w-full h-screen z-[100] overflow-hidden"
+        style={{ background: '#000' }}
+      >
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full"
-          style={{ background: '#000000' }}
+          style={{ background: '#000', display: 'block' }}
         />
 
         {/* Loading overlay */}
@@ -158,182 +314,157 @@ const ScrollytellingHero = () => {
           </div>
         )}
 
-        {/* Beat 0 — entrance on load, exits on scroll */}
-        <FirstBeat imagesLoaded={imagesLoaded} />
+        {imagesLoaded && (
+          <>
+            <FirstBeat visible={beatIndex === -1} />
 
-
-        {/* Beat 1 */}
-        <ScrollyBeat
-          start="15%"
-          end="30%"
-          className="items-start justify-center pl-8 md:pl-16 lg:pl-24"
-          direction="left"
-        >
-          <h2 className="beat-headline text-5xl md:text-7xl lg:text-8xl font-black mb-6 leading-tight text-white">
-            Feel the<br />fizz.
-          </h2>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 max-w-lg leading-relaxed font-light">
-            Every bottle holds a little anticipation.
-          </p>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 mt-2 font-light">
-            Then comes the <span className="text-pop-red font-bold">Pop.</span>
-          </p>
-        </ScrollyBeat>
-
-        {/* Beat 2 */}
-        <ScrollyBeat
-          start="38%"
-          end="55%"
-          className="items-end justify-center pr-8 md:pr-16 lg:pr-24 text-right"
-          direction="right"
-        >
-          <h2 className="beat-headline text-5xl md:text-7xl lg:text-8xl font-black mb-6 leading-tight text-white">
-            Then everything<br />
-            <span className="text-pop-red">changes.</span>
-          </h2>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 max-w-lg leading-relaxed font-light">One twist.</p>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 font-light">One release.</p>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 font-light">One unforgettable Pop.</p>
-        </ScrollyBeat>
-
-        {/* Beat 3 — final CTA */}
-        <ScrollyBeat
-          start="70%"
-          end="100%"
-          className="items-center justify-center text-center"
-          direction="up"
-        >
-          <h2 className="beat-headline text-5xl md:text-7xl lg:text-8xl font-black mb-6 leading-tight text-white">
-            Bold. Refreshing.<br />
-            Unmistakably <span className="text-pop-red">Pop.</span>
-          </h2>
-          <p className="beat-sub text-xl md:text-2xl text-gray-300 max-w-3xl leading-relaxed font-light mb-8">
-            Rich cola flavor, crisp carbonation, and a refreshingly bold finish.
-          </p>
-          <div className="beat-sub flex flex-col sm:flex-row gap-4 items-center justify-center mt-8">
-            <a
-              href="#product"
-              className="px-8 py-4 bg-pop-red hover:bg-pop-red-dark text-white font-bold text-lg rounded-full transition-all duration-300 transform hover:scale-105 uppercase tracking-wider"
+            <BeatPanel
+              visible={beatIndex === 0}
+              className="items-start justify-center pl-6 md:pl-16 lg:pl-24"
+              direction="left"
             >
-              Discover Pop Cola
-            </a>
-            <a
-              href="#flavors"
-              className="px-8 py-4 border-2 border-white hover:bg-white hover:text-black text-white font-bold text-lg rounded-full transition-all duration-300 uppercase tracking-wider"
-            >
-              Explore the range
-            </a>
-          </div>
-        </ScrollyBeat>
+              <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black mb-4 md:mb-6 leading-tight text-white">
+                Feel the<br />fizz.
+              </h2>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 max-w-sm md:max-w-lg leading-relaxed font-light">
+                Every bottle holds a little anticipation.
+              </p>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 mt-2 font-light">
+                Then comes the <span className="text-pop-red font-bold">Pop.</span>
+              </p>
+            </BeatPanel>
 
-        <ScrollIndicator imagesLoaded={imagesLoaded} />
+            <BeatPanel
+              visible={beatIndex === 1}
+              className="items-end justify-center pr-6 md:pr-16 lg:pr-24 text-right"
+              direction="right"
+            >
+              <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black mb-4 md:mb-6 leading-tight text-white">
+                Then everything<br />
+                <span className="text-pop-red">changes.</span>
+              </h2>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 max-w-sm md:max-w-lg leading-relaxed font-light">One twist.</p>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 font-light">One release.</p>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 font-light">One unforgettable Pop.</p>
+            </BeatPanel>
+
+            <BeatPanel
+              visible={beatIndex === 2}
+              className="items-center justify-center text-center"
+              direction="up"
+            >
+              <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black mb-4 md:mb-6 leading-tight text-white">
+                Bold. Refreshing.<br />
+                Unmistakably <span className="text-pop-red">Pop.</span>
+              </h2>
+              <p className="text-base sm:text-xl md:text-2xl text-gray-300 max-w-xs sm:max-w-xl md:max-w-3xl leading-relaxed font-light mb-4 md:mb-8">
+                Rich cola flavour, crisp carbonation, and a refreshingly bold finish.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center justify-center mt-6 sm:mt-8">
+                <a
+                  href="#products"
+                  className="w-full sm:w-auto px-6 sm:px-8 py-3.5 sm:py-4 bg-pop-red hover:bg-pop-red-dark text-white font-bold text-base sm:text-lg rounded-full transition-all duration-300 hover:scale-105 uppercase tracking-wider text-center"
+                >
+                  Discover Pop Cola
+                </a>
+                <a
+                  href="#about"
+                  className="w-full sm:w-auto px-6 sm:px-8 py-3.5 sm:py-4 border-2 border-white hover:bg-white hover:text-black text-white font-bold text-base sm:text-lg rounded-full transition-all duration-300 uppercase tracking-wider text-center"
+                >
+                  Explore the range
+                </a>
+              </div>
+            </BeatPanel>
+
+            {!animDone && <ScrollIndicator />}
+          </>
+        )}
       </div>
-    </section>
+
+      {/*
+        Tall spacer — this is what the user actually scrolls through.
+        The fixed hero above reads window.scrollY relative to this spacer
+        to derive progress (0 → 1) across the animation.
+      */}
+      <div
+        ref={spacerRef}
+        style={{ height: `${SCROLL_SCREENS * 100}vh` }}
+        aria-hidden="true"
+      />
+    </>
   );
 };
 
-/* ─── First Beat: cinematic entrance on load, scroll-driven exit ─── */
-const FirstBeat = ({ imagesLoaded }) => {
-  const beatRef = useRef(null);
-  const hasAnimated = useRef(false);
+// ─── FirstBeat ────────────────────────────────────────────────────────────────
+const FirstBeat = ({ visible }) => {
+  const ref          = useRef(null);
+  const entranceDone = useRef(false);
 
   useEffect(() => {
-    if (!imagesLoaded || hasAnimated.current) return;
-    hasAnimated.current = true;
-
-    const el = beatRef.current;
+    if (!visible || entranceDone.current) return;
+    entranceDone.current = true;
+    const el = ref.current;
     if (!el) return;
 
-    const heading = el.querySelector('.first-heading');
-    const tagline = el.querySelector('.first-tagline');
-    const sub = el.querySelector('.first-sub');
-    const redWord = el.querySelector('.first-red');
-    const cta = el.querySelector('.first-cta');
+    const heading = el.querySelector('.fb-heading');
+    const red     = el.querySelector('.fb-red');
+    const tagline = el.querySelector('.fb-tagline');
+    const cta     = el.querySelector('.fb-cta');
 
-    // Split heading into chars for staggered entrance
     let split = null;
-    try {
-      split = new SplitText(heading, { type: 'chars,words' });
-    } catch (e) {
-      // SplitText not available — fall back gracefully
-    }
+    try { split = new SplitText(heading, { type: 'chars,words' }); } catch (_) {}
 
     const tl = gsap.timeline({ defaults: { ease: 'expo.out' } });
-
-    // Entrance
     gsap.set(el, { opacity: 1 });
-
-    if (split && split.chars.length) {
+    if (split?.chars?.length) {
       tl.from(split.chars, {
-        opacity: 0,
-        y: 80,
-        rotateX: -90,
+        opacity: 0, y: 80, rotateX: -90,
         transformOrigin: '50% 50% -40px',
-        stagger: 0.025,
-        duration: 1,
+        stagger: 0.025, duration: 1,
       });
     } else {
       tl.from(heading, { opacity: 0, y: 60, duration: 1 });
     }
-
-    tl.from(
-      redWord,
-      { scale: 0.6, opacity: 0, duration: 0.7, ease: 'back.out(2)' },
-      '-=0.4'
-    );
+    tl.from(red,     { scale: 0.6, opacity: 0, duration: 0.7, ease: 'back.out(2)' }, '-=0.4');
     tl.from(tagline, { opacity: 0, y: 30, duration: 0.8 }, '-=0.3');
-    if (sub) tl.from(sub, { opacity: 0, y: 20, duration: 0.7 }, '-=0.5');
     if (cta) tl.from(cta, { opacity: 0, y: 16, duration: 0.6 }, '-=0.4');
 
-    // Scroll-driven exit
-    const section = el.closest('section');
-    if (section) {
-      gsap.to(el, {
-        opacity: 0,
-        y: -60,
-        ease: 'power2.in',
-        scrollTrigger: {
-          trigger: section,
-          start: 'top top',
-          end: '12% top',
-          scrub: 0.6,
-        },
-      });
-    }
+    return () => { split?.revert(); };
+  }, [visible]);
 
-    return () => {
-      split?.revert();
-    };
-  }, [imagesLoaded]);
+  useEffect(() => {
+    if (!entranceDone.current) return;
+    const el = ref.current;
+    if (!el) return;
+    gsap.to(el, { opacity: visible ? 1 : 0, duration: 0.3, ease: 'power2.inOut' });
+  }, [visible]);
 
   return (
     <div
-      ref={beatRef}
+      ref={ref}
       className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-6 z-10"
       style={{ opacity: 0 }}
     >
       <div className="pointer-events-auto">
-        <h1 className="first-heading text-6xl md:text-8xl lg:text-[clamp(4rem,10vw,9rem)] font-black leading-none mb-4 tracking-tighter text-white">
+        <h1 className="fb-heading text-[clamp(2.6rem,10vw,9rem)] font-black leading-none mb-3 md:mb-4 tracking-tighter text-white">
           Pop into something
         </h1>
-        <h1 className="first-red text-6xl md:text-8xl lg:text-[clamp(4rem,10vw,9rem)] font-black leading-none mb-8 tracking-tighter text-pop-red inline-block">
+        <h1 className="fb-red text-[clamp(2.6rem,10vw,9rem)] font-black leading-none mb-5 md:mb-8 tracking-tighter text-pop-red inline-block">
           refreshing.
         </h1>
-
-        <p className="first-tagline text-xl md:text-3xl text-gray-300 font-light max-w-2xl leading-relaxed mx-auto">
+        <p className="fb-tagline text-base sm:text-xl md:text-3xl text-gray-300 font-light max-w-xs sm:max-w-xl md:max-w-2xl leading-relaxed mx-auto">
           Bold flavours. Crisp carbonation. Made in Nigeria.
         </p>
-
-        <div className="first-cta flex flex-col sm:flex-row gap-4 items-center justify-center mt-10">
+        <div className="fb-cta flex flex-col sm:flex-row gap-3 sm:gap-4 items-center justify-center mt-7 sm:mt-10">
           <a
             href="#products"
-            className="px-8 py-4 bg-pop-red hover:bg-pop-red-dark text-white font-bold text-base rounded-full transition-all duration-300 hover:scale-105 uppercase tracking-wider"
+            className="w-full sm:w-auto px-6 sm:px-8 py-3.5 sm:py-4 bg-pop-red hover:bg-pop-red-dark text-white font-bold text-sm sm:text-base rounded-full transition-all duration-300 hover:scale-105 uppercase tracking-wider text-center"
           >
             Our Range
           </a>
           <a
             href="#about"
-            className="px-8 py-4 border border-white/30 hover:border-white text-white font-bold text-base rounded-full transition-all duration-300 uppercase tracking-wider"
+            className="w-full sm:w-auto px-6 sm:px-8 py-3.5 sm:py-4 border border-white/30 hover:border-white text-white font-bold text-sm sm:text-base rounded-full transition-all duration-300 uppercase tracking-wider text-center"
           >
             Our Story
           </a>
@@ -343,141 +474,53 @@ const FirstBeat = ({ imagesLoaded }) => {
   );
 };
 
-/* ─── Subsequent beats: scroll-driven in + out ─── */
-const ScrollyBeat = ({ start, end, className, direction = 'up', children }) => {
-  const beatRef = useRef(null);
+// ─── BeatPanel ────────────────────────────────────────────────────────────────
+const ENTER = { left: { x: -70, y: 0 }, right: { x: 70, y: 0 }, up: { x: 0, y: 60 } };
 
-  const enterFrom = {
-    up:    { y: 70,   x: 0,    rotateY: 0  },
-    left:  { y: 0,    x: -80,  rotateY: 12 },
-    right: { y: 0,    x: 80,   rotateY: -12 },
-  }[direction] || { y: 70, x: 0, rotateY: 0 };
+const BeatPanel = ({ visible, className, direction = 'up', children }) => {
+  const ref     = useRef(null);
+  const prevRef = useRef(false);
 
   useEffect(() => {
-    const el = beatRef.current;
+    const el = ref.current;
     if (!el) return;
-    const section = el.closest('section');
-    if (!section) return;
+    const was = prevRef.current;
+    prevRef.current = visible;
+    const from = ENTER[direction] ?? ENTER.up;
 
-    const startPct = parseFloat(start) / 100;
-    const endPct   = parseFloat(end) / 100;
-    // Minimum fade window of 0.06 (6% of the scroll range) avoids frames
-    // so short that the element flashes imperceptibly fast.
-    const fadePct  = Math.max(0.06, Math.min(0.12, (endPct - startPct) * 0.28));
-
-    const tl = gsap.timeline({
-      scrollTrigger: {
-        trigger: section,
-        start: 'top top',
-        end: 'bottom top',
-        scrub: 0.6,
-      },
-    });
-
-    // Animate only the wrapper — do NOT separately tween opacity on children
-    // while the parent opacity is also being tweened; that causes flicker from
-    // compounding opacity multiplications at partial values.
-    tl.fromTo(
-      el,
-      { opacity: 0, ...enterFrom },
-      { opacity: 1, y: 0, x: 0, rotateY: 0, ease: 'power3.out', duration: fadePct },
-      startPct
-    );
-
-    // Slide headline and subs using only transform (no opacity) so they don't
-    // fight with the wrapper's own opacity fade.
-    const headline = el.querySelector('.beat-headline');
-    const subs     = el.querySelectorAll('.beat-sub');
-
-    if (headline) {
-      tl.fromTo(
-        headline,
-        { y: 40, skewY: 4 },
-        { y: 0, skewY: 0, ease: 'expo.out', duration: fadePct * 0.8 },
-        startPct + fadePct * 0.05
-      );
+    if (visible && !was) {
+      gsap.killTweensOf(el);
+      gsap.fromTo(el, { opacity: 0, ...from }, { opacity: 1, x: 0, y: 0, duration: 0.5, ease: 'power3.out' });
+    } else if (!visible && was) {
+      gsap.killTweensOf(el);
+      gsap.to(el, { opacity: 0, duration: 0.3, ease: 'power2.in' });
     }
-    if (subs.length) {
-      tl.fromTo(
-        subs,
-        { y: 25 },
-        { y: 0, ease: 'power2.out', stagger: 0.02, duration: fadePct * 0.6 },
-        startPct + fadePct * 0.25
-      );
-    }
-
-    // Exit — fade out wrapper only
-    tl.to(
-      el,
-      { opacity: 0, y: direction === 'right' ? 0 : -50, x: direction === 'right' ? 80 : 0, ease: 'power2.in', duration: fadePct },
-      endPct - fadePct
-    );
-
-    // Force timeline to exactly 1 second duration so percentages map perfectly to scroll
-    tl.set({}, {}, 1);
-
-    return () => {
-      tl.scrollTrigger?.kill();
-      tl.kill();
-    };
-  }, [start, end, direction]);
+  }, [visible, direction]);
 
   return (
     <div
-      ref={beatRef}
+      ref={ref}
       className={`absolute inset-0 flex flex-col pointer-events-none px-6 ${className}`}
-      style={{ opacity: 0, perspective: '800px' }}
+      style={{ opacity: 0 }}
     >
-      <div className="pointer-events-auto">
-        {children}
-      </div>
+      <div className="pointer-events-auto">{children}</div>
     </div>
   );
 };
 
-/* ─── Scroll indicator ─── */
-const ScrollIndicator = ({ imagesLoaded }) => {
-  const indicatorRef = useRef(null);
+// ─── ScrollIndicator ─────────────────────────────────────────────────────────
+const ScrollIndicator = () => {
   const dotRef = useRef(null);
-
   useEffect(() => {
-    if (!imagesLoaded) return;
-
-    // Pulse the dot
     gsap.to(dotRef.current, {
-      scaleY: 0.3,
-      opacity: 0,
-      duration: 1,
-      ease: 'power1.inOut',
-      repeat: -1,
-      yoyo: true,
+      scaleY: 0.3, opacity: 0, duration: 1,
+      ease: 'power1.inOut', repeat: -1, yoyo: true,
     });
-
-    // Fade out on first scroll
-    gsap.to(indicatorRef.current, {
-      opacity: 0,
-      y: 10,
-      scrollTrigger: {
-        trigger: indicatorRef.current?.closest('section'),
-        start: 'top top',
-        end: '8% top',
-        scrub: true,
-      },
-    });
-  }, [imagesLoaded]);
-
+  }, []);
   return (
-    <div
-      ref={indicatorRef}
-      className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center z-20"
-    >
-      <span className="text-xs uppercase tracking-[0.25em] mb-3 font-medium text-white/60">
-        Scroll
-      </span>
-      <div
-        ref={dotRef}
-        className="w-px h-16 bg-gradient-to-b from-white/70 to-transparent origin-top"
-      />
+    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex flex-col items-center z-20 pointer-events-none">
+      <span className="text-[10px] uppercase tracking-[0.2em] mb-2 font-medium text-white/40">Scroll</span>
+      <div ref={dotRef} className="w-px h-8 bg-gradient-to-b from-white/50 to-transparent origin-top" />
     </div>
   );
 };

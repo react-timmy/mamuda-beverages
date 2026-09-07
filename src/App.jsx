@@ -87,7 +87,7 @@ function App() {
       />
 
       <main
-        className="relative min-h-screen text-white font-sans selection:bg-pop-red selection:text-white"
+        className="relative min-h-screen text-white font-sans overflow-x-hidden selection:bg-pop-red selection:text-white"
         style={{ background: '#050505' }}
       >
         <Navigation />
@@ -113,6 +113,8 @@ function App() {
         {/* Footer */}
         <Footer />
       </main>
+
+      
     </>
   );
 }
@@ -123,19 +125,19 @@ const Footer = () => {
   return (
     <footer
       id="contact"
-      className="py-20 px-6 md:px-12 border-t border-white/8"
+      className="py-12 sm:py-20 px-4 sm:px-6 md:px-12 border-t border-white/8"
       style={{ background: '#030203' }}
     >
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 sm:gap-12 mb-10 sm:mb-16">
 
-          {/* Brand */}
-          <div className="md:col-span-2">
-            <div className="flex items-center gap-3 mb-4">
-              <img src="/assets/mamuda-logo.png" alt="Mamuda Beverages" className="h-10 w-auto" />
+          {/* Brand — full width on mobile */}
+          <div className="col-span-2">
+            <div className="flex items-center gap-3 mb-3 sm:mb-4">
+              <img src="/assets/mamuda-logo.png" alt="Mamuda Beverages" className="h-8 sm:h-10 w-auto" />
             </div>
-            <p className="text-gray-400 text-sm leading-relaxed max-w-xs mb-6">
-              Mamuda Beverages Nigeria Limited — makers of Pop Cola, Pop Power Energy Drink, and a full range of carbonated beverages. From our Kano factory to every corner of Nigeria.
+            <p className="text-gray-400 text-xs sm:text-sm leading-relaxed max-w-xs mb-4 sm:mb-6">
+              Mamuda Beverages Nigeria Limited — makers of Pop Cola and a full range of carbonated beverages. From our Kano factory to every corner of Nigeria.
             </p>
             <p className="text-gray-500 text-xs uppercase tracking-wider">
               Part of the <span className="text-white/60">Mamuda Group</span>
@@ -144,9 +146,9 @@ const Footer = () => {
 
           {/* Products */}
           <div>
-            <h4 className="font-black text-white text-sm uppercase tracking-widest mb-5">Products</h4>
-            <ul className="space-y-2.5 text-gray-400 text-sm">
-              {['Pop Cola', 'Pop Apple', 'Pop Green Apple', 'Pop Chapman', 'Pop Up', 'Pop Orange', 'Pop Power'].map(p => (
+            <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-widest mb-4 sm:mb-5">Products</h4>
+            <ul className="space-y-2 sm:space-y-2.5 text-gray-400 text-xs sm:text-sm">
+              {['Pop Cola', 'Pop Apple', 'Pop Green Apple', 'Pop Chapman', 'Pop Up', 'Pop Orange'].map(p => (
                 <li key={p}>
                   <a href="#products" className="hover:text-white transition-colors hover:translate-x-1 inline-block duration-200">
                     {p}
@@ -158,8 +160,8 @@ const Footer = () => {
 
           {/* Company */}
           <div>
-            <h4 className="font-black text-white text-sm uppercase tracking-widest mb-5">Company</h4>
-            <ul className="space-y-2.5 text-gray-400 text-sm">
+            <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-widest mb-4 sm:mb-5">Company</h4>
+            <ul className="space-y-2 sm:space-y-2.5 text-gray-400 text-xs sm:text-sm">
               <li><a href="#about" className="hover:text-white transition-colors">About Mamuda</a></li>
               <li><a href="#mission" className="hover:text-white transition-colors">Our Mission</a></li>
               <li><a href="https://www.mamudagroup.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Mamuda Group ↗</a></li>
@@ -167,8 +169,8 @@ const Footer = () => {
               <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
             </ul>
 
-            <h4 className="font-black text-white text-sm uppercase tracking-widest mt-8 mb-5">Connect</h4>
-            <ul className="space-y-2.5 text-gray-400 text-sm">
+            <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-widest mt-6 sm:mt-8 mb-4 sm:mb-5">Connect</h4>
+            <ul className="space-y-2 sm:space-y-2.5 text-gray-400 text-xs sm:text-sm">
               <li><a href="#" className="hover:text-white transition-colors">Instagram</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Twitter / X</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Facebook</a></li>
@@ -177,9 +179,9 @@ const Footer = () => {
         </div>
 
         {/* Bottom bar */}
-        <div className="pt-8 border-t border-white/8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-600">
+        <div className="pt-6 sm:pt-8 border-t border-white/8 flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-4 text-xs text-gray-600">
           <p>&copy; {year} Mamuda Beverages Nigeria Limited. All rights reserved.</p>
-          <div className="flex gap-6">
+          <div className="flex gap-5 sm:gap-6">
             <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
             <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
           </div>

@@ -47,7 +47,7 @@ const Navigation = () => {
   return (
     <>
       {/* ── Main nav bar ── */}
-      <nav className="fixed top-0 left-0 w-full z-50 bg-transparent py-5">
+      <nav className="fixed top-0 left-0 w-full z-[110] bg-transparent py-5">
         <div className="max-w-7xl mx-auto px-6 md:px-12 flex justify-between items-center">
 
           {/* Logo */}
@@ -103,7 +103,7 @@ const Navigation = () => {
 
       {/* ── Mobile full-screen menu ── */}
       <div
-        className={`fixed inset-0 z-40 bg-black/95 flex flex-col items-center justify-center gap-8 transition-all duration-500 ${
+        className={`fixed inset-0 z-[109] bg-black/95 flex flex-col items-center justify-center gap-8 transition-all duration-500 ${
           menuOpen
             ? 'opacity-100 pointer-events-auto visible backdrop-blur-xl'
             : 'opacity-0 pointer-events-none invisible'
